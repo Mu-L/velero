@@ -127,6 +127,7 @@ func (bu *blockUploader) Backup(source sourceInfo, parentObject udmrepo.ID, bitm
 		StartTime:   snapStart,
 		EndTime:     snapEnd,
 		Description: source.realSource,
+		TotalSize:   objectSize,
 		RootObject: udmrepo.ObjectMetadata{
 			ID:          entryId,
 			Name:        "bdev-root",
