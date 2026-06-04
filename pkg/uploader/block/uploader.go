@@ -314,7 +314,8 @@ func copyTailData(source io.ReaderAt, writer udmrepo.ObjectWriter, totalLength i
 
 func getObjectName(source string) string {
 	s := strings.ReplaceAll(source, "/", "-")
-	return strings.ReplaceAll(s, "\\", "-")
+	s = strings.ReplaceAll(s, "\\", "-")
+	return strings.Trim(s, "-")
 }
 
 func loadObjectFromSnapshot(ctx context.Context, rep udmrepo.BackupRepo, snapshot *udmrepo.Snapshot) (udmrepo.ID, error) {
