@@ -11,6 +11,7 @@
         - [Restore API Change](#restore-api-change)
         - [Controller Logic](#controller-logic)
         - [Restore CLI](#restore-cli)
+        - [Restore Describe Output](#restore-describe-output)
         - [Install Path](#install-path)
         - [Curated Default ConfigMap Example](#curated-default-configmap-example)
     - [Alternatives Considered](#alternatives-considered)
@@ -111,9 +112,13 @@ type RestoreSpec struct {
     // When true, the default modifier is skipped even if configured on the server.
     // Has no effect when a per-restore ResourceModifier is specified.
     // +optional
-    SkipDefaultResourceModifier bool `json:"skipDefaultResourceModifier,omitempty"`
+    // +nullable
+    SkipDefaultResourceModifier *bool `json:"skipDefaultResourceModifier,omitempty"`
 }
 ```
+
+This follows the existing RestoreSpec convention where optional booleans use `*bool` with `+nullable` (e.g., `RestorePVs`, `PreserveNodePorts`, `IncludeClusterResources`).
+This preserves the ability to distinguish "unset" from "explicit false" if needed in the future.
 
 
 ### Controller Logic
@@ -148,7 +153,7 @@ func (r *restoreReconciler) validateAndComplete(restore *api.Restore) (backupInf
         resourceModifiers = r.loadResourceModifierConfigMap(
             restore, restore.Spec.ResourceModifier.Name, false,
         )
-    } else if r.defaultResourceModifierConfigMap != "" && !restore.Spec.SkipDefaultResourceModifier {
+    } else if r.defaultResourceModifierConfigMap != "" && !boolptr.IsSetToTrue(restore.Spec.SkipDefaultResourceModifier) {
         // No per-restore modifier: apply server default if configured and not skipped.
         resourceModifiers = r.loadResourceModifierConfigMap(
             restore, r.defaultResourceModifierConfigMap, true,
@@ -176,7 +181,7 @@ func (r *restoreReconciler) loadResourceModifierConfigMap(
     ); err != nil {
         if isDefault {
             r.logger.WithError(err).Warnf(
-                "Default resource modifier configmap %s/%s not found, skipping",
+                "Failed to retrieve default resource modifier configmap %s/%s, skipping",
                 restore.Namespace, cmName,
             )
             return nil
@@ -258,16 +263,30 @@ func (o *CreateOptions) BindFlags(flags *pflag.FlagSet) {
 }
 ```
 
-Set the field on the RestoreSpec when building the Restore object:
+Set the field on the RestoreSpec when building the Restore object.
+Only set it when the flag is true (using `boolptr.True()`) to leave it nil otherwise, consistent with how other `*bool` fields are handled:
 
 ```go
-Spec: api.RestoreSpec{
-    // ... existing fields ...
-    SkipDefaultResourceModifier: o.SkipDefaultResourceModifier,
+if o.SkipDefaultResourceModifier {
+    restore.Spec.SkipDefaultResourceModifier = boolptr.True()
 }
 ```
 
-Update the restore describer in `pkg/cmd/util/output/restore_describer.go` to display the field when set.
+### Restore Describe Output
+
+Update the restore describer in `pkg/cmd/util/output/restore_describer.go` to show which resource modifier was applied and its source.
+The describe output should reflect the resolved state:
+
+- When the default resource modifier was applied, display its ConfigMap name and source:
+  ```
+  Default Resource Modifier:  default-restore-resource-modifiers
+  ```
+- When the default was skipped because `SkipDefaultResourceModifier` is true:
+  ```
+  Default Resource Modifier:  skipped (SkipDefaultResourceModifier=true)
+  ```
+- When the default was skipped because a per-restore modifier was specified, no extra output is needed since the per-restore modifier is already displayed under the existing `Resource Modifier` field.
+- When the default was ignored due to a validation or retrieval error, the warning is already logged to the restore log. The describe output should not surface transient errors.
 
 ### Install Path
 
@@ -298,7 +317,7 @@ Add a builder method to `pkg/builder/restore_builder.go`:
 
 ```go
 func (b *RestoreBuilder) SkipDefaultResourceModifier(val bool) *RestoreBuilder {
-    b.object.Spec.SkipDefaultResourceModifier = val
+    b.object.Spec.SkipDefaultResourceModifier = &val
     return b
 }
 ```
@@ -396,5 +415,3 @@ The new `SkipDefaultResourceModifier` field in RestoreSpec defaults to `false` a
 
 - Should additional CNI annotations (Calico, Cilium) be included in the curated example ConfigMap?
 Feedback from the community on which annotations are commonly problematic would be helpful.
-- Should `velero restore describe` show which resource modifier was used (default vs per-restore)?
-This would improve observability but is a minor enhancement that can be added separately.
