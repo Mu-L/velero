@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-http://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -99,7 +99,7 @@ func (bu *blockUploader) Backup(source sourceInfo, parentObject udmrepo.ID, bitm
 
 	id, backupSize, objectSize, err := bu.backupObject(source.dev, destObj, bitmap, source.size)
 	if err != nil {
-		return udmrepo.Snapshot{}, 0, errors.Wrap(err, "error to backup file with incremental")
+		return udmrepo.Snapshot{}, 0, errors.Wrapf(err, "error backing up bdev %s", source.realSource)
 	}
 
 	entryId, err := bu.repoWriter.WriteMetadata(bu.ctx, &udmrepo.Metadata{
@@ -117,7 +117,7 @@ func (bu *blockUploader) Backup(source sourceInfo, parentObject udmrepo.ID, bitm
 			Description: "bdev-root",
 		})
 	if err != nil {
-		return udmrepo.Snapshot{}, 0, errors.Wrap(err, "error to write metadata")
+		return udmrepo.Snapshot{}, 0, errors.Wrap(err, "error writing metadata")
 	}
 
 	snapEnd := bu.repoWriter.Time()
@@ -139,13 +139,13 @@ func (bu *blockUploader) Backup(source sourceInfo, parentObject udmrepo.ID, bitm
 
 // TODO implement in following PRs
 func (bu *blockUploader) Restore(snapshot udmrepo.Snapshot, dest destInfo, bitmap cbt.Iterator, configs map[string]string) (int64, error) {
-	return 0, nil
+	return 0, errors.New("not implemented")
 }
 
 func (bu *blockUploader) backupObject(dev *os.File, dest udmrepo.ObjectWriter, bitmap cbt.Iterator, totalLength int64) (udmrepo.ID, int64, int64, error) {
 	backupSize, objectSize, err := bu.backupData(dev, dest, bitmap, totalLength)
 	if err != nil {
-		return "", backupSize, objectSize, errors.Wrap(err, "error copying file data incremental")
+		return "", backupSize, objectSize, err
 	}
 
 	id, err := dest.Result()

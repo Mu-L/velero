@@ -75,7 +75,7 @@ func TestGetObjectName(t *testing.T) {
 		{
 			name:     "unix path",
 			source:   "/var/lib/kubelet/pods/uuid/volumes/test",
-			expected: "-var-lib-kubelet-pods-uuid-volumes-test",
+			expected: "var-lib-kubelet-pods-uuid-volumes-test",
 		},
 		{
 			name:     "windows path",
@@ -196,7 +196,7 @@ func TestBlockUploaderBackup(t *testing.T) {
 			name:             "canceled in progress",
 			cancelInProgress: true,
 			expectErr:        true,
-			expectErrStr:     "error copying file data incremental: uploader is canceled",
+			expectErrStr:     "error backing up bdev /data/volume1: uploader is canceled",
 		},
 		{
 			name:         "create object writer err",
@@ -357,7 +357,7 @@ func TestBlockUploaderBackup(t *testing.T) {
 				}
 
 				repoWriter.On("NewObjectWriter", mock.Anything, mock.MatchedBy(func(opt udmrepo.ObjectWriteOptions) bool {
-					return opt.Description == "BDEV:-data-volume1" && opt.BackupMode == backupMode
+					return opt.Description == "BDEV:data-volume1" && opt.BackupMode == backupMode
 				})).Return(objWriter, tc.createObjErr)
 			}
 
