@@ -476,6 +476,9 @@ func (ctx *restoreContext) getNamespaceFilter(namespace string) *resolvedNamespa
 	}
 
 	// 2. Walk patterns in definition order (first-match semantics)
+	// Note: namespaceFilterCache is mutated below without synchronization. This is safe
+	// today because resource collection runs sequentially. If the restore loop is
+	// parallelized in the future, these map writes will need a lock to prevent data races.
 	for _, p := range ctx.namespacedFilterPatterns {
 		if p.compiled != nil {
 			if p.compiled.Match(namespace) {
@@ -2622,6 +2625,9 @@ func (ctx *restoreContext) getSelectedRestoreableItems(resource string, original
 								if strings.EqualFold(k, actualKind) {
 									rf = filter
 									// Cache it for future lookups of this resource
+									// Note: resourceFilterMap is mutated in place without synchronization.
+									// This is safe today because resource collection runs sequentially.
+									// If parallelized in the future, this will need a lock to prevent data races.
 									nsFilter.resourceFilterMap[resource] = rf
 									break
 								}
@@ -2653,7 +2659,10 @@ func (ctx *restoreContext) getSelectedRestoreableItems(resource string, original
 						for _, k := range filter.originalKinds {
 							if strings.EqualFold(k, actualKind) {
 								rf = filter
-								// Cache it
+								// Cache it for future lookups of this resource
+								// Note: clusterScopedFilterMap is mutated in place without synchronization.
+								// This is safe today because resource collection runs sequentially.
+								// If parallelized in the future, this will need a lock to prevent data races.
 								ctx.clusterScopedFilterMap[resource] = rf
 								useFilterPolicy = true
 								break
