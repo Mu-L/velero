@@ -447,6 +447,7 @@ type resolvedResourceFilter struct {
 	labelSelector    labels.Selector
 	orLabelSelectors []labels.Selector
 	nameIE           *collections.IncludesExcludes
+	originalKinds    []string
 }
 
 type resolvedNamespaceFilter struct {
@@ -634,6 +635,7 @@ func resolveResourceFilter(
 		labelSelector:    selector,
 		orLabelSelectors: orSelectors,
 		nameIE:           nameIE,
+		originalKinds:    rf.Kinds,
 	}, nil
 }
 
@@ -2608,6 +2610,29 @@ func (ctx *restoreContext) getSelectedRestoreableItems(resource string, original
 			if nsFilter := ctx.getNamespaceFilter(originalNamespace); nsFilter != nil {
 				// Resolve effective filter: kind-specific takes precedence over catch-all
 				rf = nsFilter.resourceFilterMap[resource]
+
+				// Peek-and-map logic for unresolvable kinds
+				if rf == nil && len(items) > 0 {
+					peekPath := archive.GetItemFilePath(ctx.restoreDir, resourceForPath, originalNamespace, items[0])
+					// Ignore unmarshal errors during peek; the main restore loop will catch and report them
+					if obj, err := archive.Unmarshal(ctx.fileSystem, peekPath); err == nil {
+						actualKind := obj.GroupVersionKind().Kind
+						for _, filter := range nsFilter.resourceFilterMap {
+							for _, k := range filter.originalKinds {
+								if strings.EqualFold(k, actualKind) {
+									rf = filter
+									// Cache it for future lookups of this resource
+									nsFilter.resourceFilterMap[resource] = rf
+									break
+								}
+							}
+							if rf != nil {
+								break
+							}
+						}
+					}
+				}
+
 				if rf == nil {
 					rf = nsFilter.catchAllFilter // may be nil if no catch-all
 				}
@@ -2618,6 +2643,27 @@ func (ctx *restoreContext) getSelectedRestoreableItems(resource string, original
 			if listedRF, ok := ctx.clusterScopedFilterMap[resource]; ok {
 				rf = listedRF
 				useFilterPolicy = true
+			} else if len(items) > 0 {
+				// Peek-and-map logic for unresolvable kinds
+				peekPath := archive.GetItemFilePath(ctx.restoreDir, resourceForPath, originalNamespace, items[0])
+				// Ignore unmarshal errors during peek; the main restore loop will catch and report them
+				if obj, err := archive.Unmarshal(ctx.fileSystem, peekPath); err == nil {
+					actualKind := obj.GroupVersionKind().Kind
+					for _, filter := range ctx.clusterScopedFilterMap {
+						for _, k := range filter.originalKinds {
+							if strings.EqualFold(k, actualKind) {
+								rf = filter
+								// Cache it
+								ctx.clusterScopedFilterMap[resource] = rf
+								useFilterPolicy = true
+								break
+							}
+						}
+						if rf != nil {
+							break
+						}
+					}
+				}
 			}
 			// If kind not listed, fall through to global selectors below
 		}

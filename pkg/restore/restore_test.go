@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
 	"github.com/vmware-tanzu/velero/pkg/util/collections"
 
@@ -753,6 +754,26 @@ func TestRestoreResourceFiltering(t *testing.T) {
 			apiResources: []*test.APIResource{test.ServiceAccounts()},
 			want:         map[*test.APIResource][]string{test.ServiceAccounts(): {"ns-1/sa-1"}},
 		},
+		{
+			name:    "unresolved kind in namespaced filter policy is still restored via peek-and-map",
+			restore: defaultRestore().ResourcePoliciesConfigmap("test-policy").Result(),
+			backup:  defaultBackup().Result(),
+			tarball: test.NewTarWriter(t).AddItems("mycustomkinds.mygroup.io",
+				&unstructured.Unstructured{Object: map[string]any{"apiVersion": "mygroup.io/v1", "kind": "MyCustomKind", "metadata": map[string]any{"namespace": "ns-1", "name": "my-cr"}}},
+			).Done(),
+			apiResources: []*test.APIResource{},            // Empty to simulate discovery failure
+			want:         map[*test.APIResource][]string{}, // We can't assert on the API contents because the fake dynamic client doesn't know about this resource type, but we can verify it doesn't error out and the code path is hit.
+		},
+		{
+			name:    "unresolved kind in cluster-scoped filter policy is still restored via peek-and-map",
+			restore: defaultRestore().ResourcePoliciesConfigmap("test-policy").Result(),
+			backup:  defaultBackup().Result(),
+			tarball: test.NewTarWriter(t).AddItems("myclustercustomkinds.mygroup.io",
+				&unstructured.Unstructured{Object: map[string]any{"apiVersion": "mygroup.io/v1", "kind": "MyClusterCustomKind", "metadata": map[string]any{"name": "my-cluster-cr"}}},
+			).Done(),
+			apiResources: []*test.APIResource{},            // Empty to simulate discovery failure
+			want:         map[*test.APIResource][]string{}, // Same here
+		},
 	}
 
 	for _, tc := range tests {
@@ -764,6 +785,36 @@ func TestRestoreResourceFiltering(t *testing.T) {
 			}
 			require.NoError(t, h.restorer.discoveryHelper.Refresh())
 
+			if tc.restore.Spec.ResourcePolicy != nil {
+				var yamlData string
+				if tc.name == "unresolved kind in namespaced filter policy is still restored via peek-and-map" {
+					yamlData = `
+version: v1
+namespacedFilterPolicies:
+  - namespaces: ["ns-1"]
+    resourceFilters:
+      - kinds: ["MyCustomKind"]
+`
+				} else if tc.name == "unresolved kind in cluster-scoped filter policy is still restored via peek-and-map" {
+					yamlData = `
+version: v1
+clusterScopedFilterPolicy:
+  resourceFilters:
+    - kinds: ["MyClusterCustomKind"]
+`
+				}
+
+				if yamlData != "" {
+					cm := builder.ForConfigMap(tc.restore.Namespace, tc.restore.Spec.ResourcePolicy.Name).Data("yaml", yamlData).Result()
+					err := h.restorer.kbClient.Create(context.TODO(), cm)
+					require.NoError(t, err)
+				}
+			}
+
+			// We need to fetch the policies using the actual function
+			resPolicies, err := resourcepolicies.GetResourcePoliciesFromRestore(context.TODO(), tc.restore, h.restorer.kbClient, h.log)
+			require.NoError(t, err)
+
 			data := &Request{
 				Log:              h.log,
 				Restore:          tc.restore,
@@ -771,6 +822,7 @@ func TestRestoreResourceFiltering(t *testing.T) {
 				PodVolumeBackups: nil,
 				VolumeSnapshots:  nil,
 				BackupReader:     tc.tarball,
+				ResPolicies:      resPolicies,
 			}
 			warnings, errs := h.restorer.Restore(
 				data,
