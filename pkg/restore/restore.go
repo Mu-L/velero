@@ -456,6 +456,9 @@ type resolvedNamespaceFilter struct {
 	// catchAllFilter holds the resolved filter for a catch-all entry (empty kinds or ["*"]).
 	// nil when no catch-all entry is defined.
 	catchAllFilter *resolvedResourceFilter
+	// hasUnresolvedKinds is true if any kind in the policy failed discovery.
+	// This is used to bypass the fast-path skip so the peek-and-map fallback can run.
+	hasUnresolvedKinds bool
 }
 
 // namespacedFilterPattern pairs a namespace pattern string with its pre-compiled
@@ -514,17 +517,24 @@ func resolveRestoreClusterScopedFilterPolicy(
 		if err != nil {
 			return nil, err
 		}
-		for _, kind := range rf.Kinds {
-			gr, resource, err := helper.ResourceFor(schema.GroupVersionResource{Resource: kind})
+		for _, kind := range resolved.originalKinds {
+			gr, resource, err := helper.ResourceFor(schema.ParseGroupResource(kind).WithVersion(""))
+
+			key := kind
 			if err != nil {
 				log.WithField("kind", kind).Warnf("Cannot resolve kind via discovery, using as-is")
-				result[kind] = resolved
-				continue
+			} else {
+				if resource.Namespaced {
+					log.Warnf("kind %q in clusterScopedFilterPolicy is a namespace-scoped resource; it will never match in a cluster-scoped filter — did you mean namespacedFilterPolicies?", kind)
+				}
+				key = gr.GroupResource().String()
 			}
-			if resource.Namespaced {
-				log.Warnf("kind %q in clusterScopedFilterPolicy is a namespace-scoped resource; it will never match in a cluster-scoped filter — did you mean namespacedFilterPolicies?", kind)
+
+			if _, exists := result[key]; exists {
+				return nil, fmt.Errorf("ambiguous policy: duplicate kind %q detected", key)
 			}
-			result[gr.GroupResource().String()] = resolved
+
+			result[key] = resolved
 		}
 	}
 	return result, nil
@@ -548,6 +558,7 @@ func resolveRestoreNamespacedFilterPolicies(
 	for _, policy := range policies {
 		rfMap := make(map[string]*resolvedResourceFilter)
 		var catchAll *resolvedResourceFilter
+		hasUnresolvedKinds := false
 
 		for _, rf := range policy.ResourceFilters {
 			resolved, err := resolveResourceFilter(rf)
@@ -560,35 +571,42 @@ func resolveRestoreNamespacedFilterPolicies(
 				continue
 			}
 
-			for _, kind := range rf.Kinds {
+			for _, kind := range resolved.originalKinds {
 				gr, resource, err := helper.ResourceFor(
-					schema.GroupVersionResource{Resource: kind},
+					schema.ParseGroupResource(kind).WithVersion(""),
 				)
+
+				key := kind
 				if err != nil {
 					log.WithField("kind", kind).Warnf(
 						"Cannot resolve kind via discovery, using as-is")
-					rfMap[kind] = resolved
-					continue
+					hasUnresolvedKinds = true
+				} else {
+					if !resource.Namespaced {
+						log.Warnf("kind %q in namespacedFilterPolicies is a cluster-scoped resource; it will never match in a namespace-scoped filter — did you mean clusterScopedFilterPolicy?", kind)
+					}
+
+					if globalExcludes[kind] || globalExcludes[gr.GroupResource().String()] {
+						log.WithFields(logrus.Fields{
+							"kind":             kind,
+							"namespacePattern": strings.Join(policy.Namespaces, ","),
+						}).Warn("namespacedFilterPolicies entry lists a kind that is globally excluded by RestoreSpec.ExcludedResources; the per-namespace filter entry has no effect")
+					}
+					key = gr.GroupResource().String()
 				}
 
-				if !resource.Namespaced {
-					log.Warnf("kind %q in namespacedFilterPolicies is a cluster-scoped resource; it will never match in a namespace-scoped filter — did you mean clusterScopedFilterPolicy?", kind)
+				if _, exists := rfMap[key]; exists {
+					return nil, nil, fmt.Errorf("ambiguous policy: duplicate kind %q detected", key)
 				}
 
-				if globalExcludes[kind] || globalExcludes[gr.GroupResource().String()] {
-					log.WithFields(logrus.Fields{
-						"kind":             kind,
-						"namespacePattern": strings.Join(policy.Namespaces, ","),
-					}).Warn("namespacedFilterPolicies entry lists a kind that is globally excluded by RestoreSpec.ExcludedResources; the per-namespace filter entry has no effect")
-				}
-
-				rfMap[gr.GroupResource().String()] = resolved
+				rfMap[key] = resolved
 			}
 		}
 
 		nsFilter := &resolvedNamespaceFilter{
-			resourceFilterMap: rfMap,
-			catchAllFilter:    catchAll,
+			resourceFilterMap:  rfMap,
+			catchAllFilter:     catchAll,
+			hasUnresolvedKinds: hasUnresolvedKinds,
 		}
 		for _, nsPattern := range policy.Namespaces {
 			result[nsPattern] = nsFilter
@@ -634,11 +652,17 @@ func resolveResourceFilter(
 	if len(rf.Names) > 0 || len(rf.ExcludedNames) > 0 {
 		nameIE = collections.NewIncludesExcludes().Includes(rf.Names...).Excludes(rf.ExcludedNames...)
 	}
+
+	normalizedKinds := make([]string, len(rf.Kinds))
+	for i, k := range rf.Kinds {
+		normalizedKinds[i] = strings.ToLower(k)
+	}
+
 	return &resolvedResourceFilter{
 		labelSelector:    selector,
 		orLabelSelectors: orSelectors,
 		nameIE:           nameIE,
-		originalKinds:    rf.Kinds,
+		originalKinds:    normalizedKinds,
 	}, nil
 }
 
@@ -2543,7 +2567,7 @@ func (ctx *restoreContext) getOrderedResourceCollection(
 			if namespace != "" && !ctx.resourceMustHave.Has(groupResource.String()) {
 				if nsFilter := ctx.getNamespaceFilter(namespace); nsFilter != nil {
 					_, kindListed := nsFilter.resourceFilterMap[groupResource.String()]
-					if !kindListed && nsFilter.catchAllFilter == nil {
+					if !kindListed && nsFilter.catchAllFilter == nil && !nsFilter.hasUnresolvedKinds {
 						ctx.log.Infof("Skipping resource %s in namespace %s: not in resourceFilters",
 							resource, namespace)
 						continue
@@ -2643,6 +2667,11 @@ func (ctx *restoreContext) getSelectedRestoreableItems(resource string, original
 					rf = nsFilter.catchAllFilter // may be nil if no catch-all
 				}
 				useFilterPolicy = true
+
+				if rf == nil {
+					ctx.log.Infof("Skipping resource %s in namespace %s: not in resourceFilters", resource, originalNamespace)
+					return restorable, warnings, errs
+				}
 			}
 		} else if ctx.clusterScopedFilterMap != nil {
 			// Cluster-scoped path: only applies if kind is listed (refinement overlay)
@@ -2650,7 +2679,10 @@ func (ctx *restoreContext) getSelectedRestoreableItems(resource string, original
 				rf = listedRF
 				useFilterPolicy = true
 			} else if len(items) > 0 {
-				// Peek-and-map logic for unresolvable kinds
+				// Peek-and-map logic for unresolvable kinds.
+				// Note: Unlike the namespaced path, this fallback is always reachable
+				// because the main restore loop does not have a fast-path skip for
+				// unlisted cluster-scoped resources.
 				peekPath := archive.GetItemFilePath(ctx.restoreDir, resourceForPath, originalNamespace, items[0])
 				// Ignore unmarshal errors during peek; the main restore loop will catch and report them
 				if obj, err := archive.Unmarshal(ctx.fileSystem, peekPath); err == nil {

@@ -1,7 +1,6 @@
 package restore
 
 import (
-	"context"
 	"io"
 	"testing"
 
@@ -9,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -19,6 +19,9 @@ import (
 )
 
 func TestRestoreResourcePoliciesFiltering(t *testing.T) {
+	customKindRes := &test.APIResource{Group: "mygroup.io", Version: "v1", Name: "mycustomkinds", Kind: "MyCustomKind", Namespaced: true}
+	clusterCustomKindRes := &test.APIResource{Group: "mygroup.io", Version: "v1", Name: "myclustercustomkinds", Kind: "MyClusterCustomKind", Namespaced: false}
+
 	tests := []struct {
 		name         string
 		restore      *velerov1api.Restore
@@ -150,6 +153,45 @@ namespacedFilterPolicies:
 				test.Deployments(): {"ns-1/deploy-1"},
 			},
 		},
+		{
+			name:    "unresolved kind in namespaced filter policy is still restored via peek-and-map",
+			restore: defaultRestore().Result(),
+			backup:  defaultBackup().Result(),
+			policyYAML: `version: v1
+namespacedFilterPolicies:
+  - namespaces: ["ns-1"]
+    resourceFilters:
+      - kinds: ["MyCustomKind"]
+`,
+			tarball: test.NewTarWriter(t).AddItems("mycustomkinds.mygroup.io",
+				&unstructured.Unstructured{Object: map[string]any{"apiVersion": "mygroup.io/v1", "kind": "MyCustomKind", "metadata": map[string]any{"namespace": "ns-1", "name": "my-cr"}}},
+			).Done(),
+			apiResources: []*test.APIResource{
+				customKindRes,
+			},
+			want: map[*test.APIResource][]string{
+				customKindRes: {"ns-1/my-cr"},
+			},
+		},
+		{
+			name:    "unresolved kind in cluster-scoped filter policy is still restored via peek-and-map",
+			restore: defaultRestore().Result(),
+			backup:  defaultBackup().Result(),
+			policyYAML: `version: v1
+clusterScopedFilterPolicy:
+  resourceFilters:
+    - kinds: ["MyClusterCustomKind"]
+`,
+			tarball: test.NewTarWriter(t).AddItems("myclustercustomkinds.mygroup.io",
+				&unstructured.Unstructured{Object: map[string]any{"apiVersion": "mygroup.io/v1", "kind": "MyClusterCustomKind", "metadata": map[string]any{"name": "my-cluster-cr"}}},
+			).Done(),
+			apiResources: []*test.APIResource{
+				clusterCustomKindRes,
+			},
+			want: map[*test.APIResource][]string{
+				clusterCustomKindRes: {"/my-cluster-cr"},
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -180,7 +222,7 @@ namespacedFilterPolicies:
 					Name: "test-policies",
 				}
 				var err error
-				resPolicies, err = resourcepolicies.GetResourcePoliciesFromRestore(context.Background(), restore, client, logrus.New())
+				resPolicies, err = resourcepolicies.GetResourcePoliciesFromRestore(t.Context(), restore, client, logrus.New())
 				require.NoError(t, err)
 			}
 
@@ -203,4 +245,41 @@ namespacedFilterPolicies:
 			assertAPIContents(t, h, tc.want)
 		})
 	}
+}
+
+func TestResolveRestoreNamespacedFilterPolicies_Validation(t *testing.T) {
+	log := logrus.New()
+	helper := test.NewFakeDiscoveryHelper(true, nil)
+
+	policies := []resourcepolicies.NamespacedFilterPolicy{
+		{
+			Namespaces: []string{"ns-1"},
+			ResourceFilters: []resourcepolicies.ResourceFilter{
+				{
+					Kinds: []string{"MyKind", "mykind"},
+				},
+			},
+		},
+	}
+
+	_, _, err := resolveRestoreNamespacedFilterPolicies(policies, nil, helper, log)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "ambiguous policy: duplicate kind")
+}
+
+func TestResolveRestoreClusterScopedFilterPolicy_Validation(t *testing.T) {
+	log := logrus.New()
+	helper := test.NewFakeDiscoveryHelper(true, nil)
+
+	policy := &resourcepolicies.ClusterScopedFilterPolicy{
+		ResourceFilters: []resourcepolicies.ResourceFilter{
+			{
+				Kinds: []string{"MyKind", "mykind"},
+			},
+		},
+	}
+
+	_, err := resolveRestoreClusterScopedFilterPolicy(policy, helper, log)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "ambiguous policy: duplicate kind")
 }

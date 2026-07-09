@@ -18,7 +18,6 @@ package controller
 
 import (
 	"bytes"
-	"context"
 	"io"
 	"testing"
 	"time"
@@ -786,7 +785,7 @@ func TestValidateAndCompleteWhenScheduleNameSpecified(t *testing.T) {
 		Phase(velerov1api.BackupPhaseCompleted).
 		Result()))
 
-	r.validateAndComplete(context.Background(), restore)
+	r.validateAndComplete(t.Context(), restore)
 	assert.Contains(t, restore.Status.ValidationErrors, "No backups found for schedule")
 	assert.Empty(t, restore.Spec.BackupName)
 
@@ -802,7 +801,7 @@ func TestValidateAndCompleteWhenScheduleNameSpecified(t *testing.T) {
 			Result(),
 	))
 
-	r.validateAndComplete(context.Background(), restore)
+	r.validateAndComplete(t.Context(), restore)
 	assert.Contains(t, restore.Status.ValidationErrors, "No completed backups found for schedule")
 	assert.Empty(t, restore.Spec.BackupName)
 
@@ -833,7 +832,7 @@ func TestValidateAndCompleteWhenScheduleNameSpecified(t *testing.T) {
 			ScheduleName: "schedule-1",
 		},
 	}
-	r.validateAndComplete(context.Background(), restore)
+	r.validateAndComplete(t.Context(), restore)
 	assert.Nil(t, restore.Status.ValidationErrors)
 	assert.Equal(t, "foo", restore.Spec.BackupName)
 }
@@ -893,7 +892,7 @@ func TestValidateAndCompleteWithResourcePolicySpecified(t *testing.T) {
 			Result(),
 	))
 
-	r.validateAndComplete(context.Background(), restore)
+	r.validateAndComplete(t.Context(), restore)
 	assert.Contains(t, restore.Status.ValidationErrors[0], "fail to get ResourcePolicies velero/test-configmap ConfigMap")
 
 	restore1 := &velerov1api.Restore{
@@ -926,7 +925,7 @@ clusterScopedFilterPolicy:
 	}
 	require.NoError(t, r.kbClient.Create(t.Context(), cm1))
 
-	r.validateAndComplete(context.Background(), restore1)
+	r.validateAndComplete(t.Context(), restore1)
 	assert.Nil(t, restore1.Status.ValidationErrors)
 
 	restore2 := &velerov1api.Restore{
@@ -963,7 +962,7 @@ volumePolicies:
 	}
 	require.NoError(t, r.kbClient.Create(t.Context(), cm2))
 
-	r.validateAndComplete(context.Background(), restore2)
+	r.validateAndComplete(t.Context(), restore2)
 	assert.Contains(t, restore2.Status.ValidationErrors[0], "fail to validate ResourcePolicies in ConfigMap velero/test-configmap-invalid")
 }
 
@@ -1022,7 +1021,7 @@ func TestValidateAndCompleteWithResourceModifierSpecified(t *testing.T) {
 			Result(),
 	))
 
-	r.validateAndComplete(context.Background(), restore)
+	r.validateAndComplete(t.Context(), restore)
 	assert.Contains(t, restore.Status.ValidationErrors[0], "failed to get resource modifiers configmap")
 
 	restore1 := &velerov1api.Restore{
@@ -1050,7 +1049,7 @@ func TestValidateAndCompleteWithResourceModifierSpecified(t *testing.T) {
 	}
 	require.NoError(t, r.kbClient.Create(t.Context(), cm1))
 
-	r.validateAndComplete(context.Background(), restore1)
+	r.validateAndComplete(t.Context(), restore1)
 	assert.Nil(t, restore1.Status.ValidationErrors)
 
 	restore2 := &velerov1api.Restore{
@@ -1079,7 +1078,7 @@ func TestValidateAndCompleteWithResourceModifierSpecified(t *testing.T) {
 	}
 	require.NoError(t, r.kbClient.Create(t.Context(), invalidVersionCm))
 
-	r.validateAndComplete(context.Background(), restore2)
+	r.validateAndComplete(t.Context(), restore2)
 	assert.Contains(t, restore2.Status.ValidationErrors[0], "Error in parsing resource modifiers provided in configmap")
 
 	restore3 := &velerov1api.Restore{
@@ -1107,7 +1106,7 @@ func TestValidateAndCompleteWithResourceModifierSpecified(t *testing.T) {
 	}
 	require.NoError(t, r.kbClient.Create(t.Context(), invalidOperatorCm))
 
-	r.validateAndComplete(context.Background(), restore3)
+	r.validateAndComplete(t.Context(), restore3)
 	assert.Contains(t, restore3.Status.ValidationErrors[0], "Validation error in resource modifiers provided in configmap")
 }
 
