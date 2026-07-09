@@ -71,8 +71,8 @@ func NewUploader(ctx context.Context, repoWriter udmrepo.BackupRepo, progress up
 	}
 }
 
-func (bu *blockUploader) Backup(source sourceInfo, parentObject udmrepo.ID, bitmap cbt.Iterator, configs map[string]string) (udmrepo.Snapshot, int64, error) {
-	snapStart := bu.repoWriter.Time()
+func (blkup *blockUploader) Backup(source sourceInfo, parentObject udmrepo.ID, bitmap cbt.Iterator, configs map[string]string) (udmrepo.Snapshot, int64, error) {
+	snapStart := blkup.repoWriter.Time()
 
 	if bitmap == nil {
 		return udmrepo.Snapshot{}, 0, errors.New("bitmap is not available")
@@ -83,7 +83,7 @@ func (bu *blockUploader) Backup(source sourceInfo, parentObject udmrepo.ID, bitm
 		backupMode = udmrepo.ObjectDataBackupModeFull
 	}
 
-	destObj, err := bu.repoWriter.NewObjectWriter(bu.ctx, udmrepo.ObjectWriteOptions{
+	destObj, err := blkup.repoWriter.NewObjectWriter(blkup.ctx, udmrepo.ObjectWriteOptions{
 		Description:  "BDEV:" + getObjectName(source.realSource),
 		DataType:     udmrepo.ObjectDataTypeData,
 		AccessMode:   udmrepo.ObjectDataAccessModeBlock,
@@ -97,12 +97,12 @@ func (bu *blockUploader) Backup(source sourceInfo, parentObject udmrepo.ID, bitm
 
 	defer destObj.Close()
 
-	id, backupSize, objectSize, err := bu.backupObject(source.dev, destObj, bitmap, source.size)
+	id, backupSize, objectSize, err := blkup.backupObject(source.dev, destObj, bitmap, source.size)
 	if err != nil {
 		return udmrepo.Snapshot{}, 0, errors.Wrapf(err, "error backing up bdev %s", source.realSource)
 	}
 
-	entryId, err := bu.repoWriter.WriteMetadata(bu.ctx, &udmrepo.Metadata{
+	entryID, err := blkup.repoWriter.WriteMetadata(blkup.ctx, &udmrepo.Metadata{
 		SubObjects: []udmrepo.ObjectMetadata{
 			{
 				ID:          id,
@@ -120,7 +120,7 @@ func (bu *blockUploader) Backup(source sourceInfo, parentObject udmrepo.ID, bitm
 		return udmrepo.Snapshot{}, 0, errors.Wrap(err, "error writing metadata")
 	}
 
-	snapEnd := bu.repoWriter.Time()
+	snapEnd := blkup.repoWriter.Time()
 
 	return udmrepo.Snapshot{
 		Source:      source.realSource,
@@ -129,7 +129,7 @@ func (bu *blockUploader) Backup(source sourceInfo, parentObject udmrepo.ID, bitm
 		Description: source.realSource,
 		TotalSize:   objectSize,
 		RootObject: udmrepo.ObjectMetadata{
-			ID:          entryId,
+			ID:          entryID,
 			Name:        "bdev-root",
 			Type:        udmrepo.ObjectDataTypeMetadata,
 			Permissions: 0o777,
@@ -138,12 +138,12 @@ func (bu *blockUploader) Backup(source sourceInfo, parentObject udmrepo.ID, bitm
 }
 
 // TODO implement in following PRs
-func (bu *blockUploader) Restore(snapshot udmrepo.Snapshot, dest destInfo, bitmap cbt.Iterator, configs map[string]string) (int64, error) {
+func (blkup *blockUploader) Restore(snapshot udmrepo.Snapshot, dest destInfo, bitmap cbt.Iterator, configs map[string]string) (int64, error) {
 	return 0, errors.New("not implemented")
 }
 
-func (bu *blockUploader) backupObject(dev *os.File, dest udmrepo.ObjectWriter, bitmap cbt.Iterator, totalLength int64) (udmrepo.ID, int64, int64, error) {
-	backupSize, objectSize, err := bu.backupData(dev, dest, bitmap, totalLength)
+func (blkup *blockUploader) backupObject(dev *os.File, dest udmrepo.ObjectWriter, bitmap cbt.Iterator, totalLength int64) (udmrepo.ID, int64, int64, error) {
+	backupSize, objectSize, err := blkup.backupData(dev, dest, bitmap, totalLength)
 	if err != nil {
 		return "", backupSize, objectSize, err
 	}
@@ -165,7 +165,7 @@ func (r *readResult) resetBuffer(list *freelist.FreeList) {
 	}
 }
 
-func (bu *blockUploader) backupData(reader io.ReaderAt, writer udmrepo.ObjectWriter, bitmap cbt.Iterator, totalLength int64) (int64, int64, error) {
+func (blkup *blockUploader) backupData(reader io.ReaderAt, writer udmrepo.ObjectWriter, bitmap cbt.Iterator, totalLength int64) (int64, int64, error) {
 	blockSize := bitmap.BlockSize()
 	list := freelist.New(bufferSize, int(blockSize))
 	resultChan := make(chan readResult, list.Capacity())
@@ -182,7 +182,7 @@ func (bu *blockUploader) backupData(reader io.ReaderAt, writer udmrepo.ObjectWri
 		var buffer []byte
 		for valid {
 			select {
-			case <-bu.ctx.Done():
+			case <-blkup.ctx.Done():
 				return
 			case <-quit:
 				return
@@ -229,11 +229,11 @@ func (bu *blockUploader) backupData(reader io.ReaderAt, writer udmrepo.ObjectWri
 
 	for curCount < int64(totalCount) {
 		select {
-		case <-bu.ctx.Done():
+		case <-blkup.ctx.Done():
 			writeErr = ErrCanceled
 		case result, readerRunning = <-resultChan:
 			if !readerRunning {
-				if bu.ctx.Err() != nil {
+				if blkup.ctx.Err() != nil {
 					writeErr = ErrCanceled
 				} else {
 					writeErr = io.ErrUnexpectedEOF
@@ -266,7 +266,7 @@ func (bu *blockUploader) backupData(reader io.ReaderAt, writer udmrepo.ObjectWri
 		result.resetBuffer(list)
 		curCount++
 
-		bu.progress.UpdateProgress(&uploader.Progress{BytesDone: lastPos, TotalBytes: aligned})
+		blkup.progress.UpdateProgress(&uploader.Progress{BytesDone: lastPos, TotalBytes: aligned})
 	}
 
 	result.resetBuffer(list)
@@ -283,7 +283,7 @@ func (bu *blockUploader) backupData(reader io.ReaderAt, writer udmrepo.ObjectWri
 
 		written += s
 
-		bu.progress.UpdateProgress(&uploader.Progress{BytesDone: aligned, TotalBytes: aligned})
+		blkup.progress.UpdateProgress(&uploader.Progress{BytesDone: aligned, TotalBytes: aligned})
 	}
 
 	return written, aligned, nil

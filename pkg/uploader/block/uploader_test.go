@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -53,12 +53,12 @@ func TestNewUploader(t *testing.T) {
 
 	uploader := NewUploader(ctx, repoWriter, progress, log)
 
-	bu, ok := uploader.(*blockUploader)
+	blkup, ok := uploader.(*blockUploader)
 	assert.True(t, ok)
-	assert.Equal(t, ctx, bu.ctx)
-	assert.Equal(t, repoWriter, bu.repoWriter)
-	assert.Equal(t, progress, bu.progress)
-	assert.Equal(t, log, bu.log)
+	assert.Equal(t, ctx, blkup.ctx)
+	assert.Equal(t, repoWriter, blkup.repoWriter)
+	assert.Equal(t, progress, blkup.progress)
+	assert.Equal(t, log, blkup.log)
 }
 
 func TestGetObjectName(t *testing.T) {
@@ -158,7 +158,7 @@ func TestCopyTailData(t *testing.T) {
 			if tc.expectErr {
 				assert.Error(t, err)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 				assert.Equal(t, tc.expected, n)
 			}
 		})
@@ -261,9 +261,9 @@ func TestBlockUploaderBackup(t *testing.T) {
 			log := logrus.New()
 			log.Out = io.Discard
 
-			bu := NewUploader(ctx, repoWriter, progress, log)
+			blkup := NewUploader(ctx, repoWriter, progress, log)
 
-			f, err := os.CreateTemp("", "blktest-*")
+			f, err := os.CreateTemp(t.TempDir(), "blktest-*")
 			require.NoError(t, err)
 			defer os.Remove(f.Name())
 			defer f.Close()
@@ -317,7 +317,7 @@ func TestBlockUploaderBackup(t *testing.T) {
 					} else if tc.cancelCtx {
 						iterMock.On("BlockSize").Return(uint(1048576))
 						iterMock.On("Count").Return(uint64(1))
-						iterMock.On("Next").Return(uint64(0), true)
+						iterMock.On("Next").Return(uint64(0), true).Maybe()
 
 						objWriter.On("Result").Return(udmrepo.ID(""), errors.New("write failed")).Maybe()
 					} else if tc.shortWrite {
@@ -361,15 +361,15 @@ func TestBlockUploaderBackup(t *testing.T) {
 				})).Return(objWriter, tc.createObjErr)
 			}
 
-			snap, size, err := bu.Backup(srcInfo, tc.parentObj, iterator, nil)
+			snap, size, err := blkup.Backup(srcInfo, tc.parentObj, iterator, nil)
 
 			if tc.expectErr {
-				assert.Error(t, err)
+				require.Error(t, err)
 				if tc.expectErrStr != "" {
 					assert.Contains(t, err.Error(), tc.expectErrStr)
 				}
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 				assert.Equal(t, "/data/volume1", snap.Source)
 				assert.Equal(t, udmrepo.ID("meta-01"), snap.RootObject.ID)
 				assert.Equal(t, int64(0), size)
