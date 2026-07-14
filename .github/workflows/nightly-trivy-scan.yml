@@ -5,6 +5,7 @@ on:
 
 jobs:
   nightly-scan:
+    if: github.repository == 'velero-io/velero'
     name: Trivy nightly scan
     runs-on: ubuntu-latest
     strategy:
