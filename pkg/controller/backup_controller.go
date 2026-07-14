@@ -215,7 +215,9 @@ func (b *backupReconciler) updateTotalBackupMetric() {
 				}
 
 				// recompute backup_last_successful_timestamp metric for each
-				// schedule (including the empty schedule, i.e. ad-hoc backups)
+				// schedule (including the empty schedule, i.e. ad-hoc backups).
+				// Reset first to prune stale entries for deleted schedules.
+				b.metrics.ResetBackupLastSuccessfulTimestamp()
 				for schedule, timestamp := range getLastSuccessBySchedule(backups.Items) {
 					b.metrics.SetBackupLastSuccessfulTimestamp(schedule, timestamp)
 				}

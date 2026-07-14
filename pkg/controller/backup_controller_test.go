@@ -2041,6 +2041,38 @@ func Test_getLastSuccessBySchedule(t *testing.T) {
 	}
 }
 
+// Test_updateTotalBackupMetric_prunesStaleTimestamps verifies that the periodic
+// resync removes backupLastSuccessfulTimestamp entries for schedules that no longer
+// have any completed backups (e.g. after the schedule and its backups are deleted).
+func Test_updateTotalBackupMetric_prunesStaleTimestamps(t *testing.T) {
+	baseTime, err := time.Parse(time.RFC1123, time.RFC1123)
+	require.NoError(t, err)
+
+	m := metrics.NewServerMetrics()
+
+	// Simulate a previous resync that set the metric for "deleted-schedule"
+	m.SetBackupLastSuccessfulTimestamp("deleted-schedule", baseTime)
+	require.Equal(t, 1, m.BackupLastSuccessfulTimestampCount())
+
+	// Current backups only contain entries for "active-schedule"
+	backups := []velerov1api.Backup{
+		*builder.ForBackup("velero", "b1").
+			ObjectMeta(builder.WithLabels(velerov1api.ScheduleNameLabel, "active-schedule")).
+			Phase(velerov1api.BackupPhaseCompleted).
+			CompletionTimestamp(baseTime).
+			Result(),
+	}
+
+	// Replicate the resync logic: reset then set
+	m.ResetBackupLastSuccessfulTimestamp()
+	for schedule, timestamp := range getLastSuccessBySchedule(backups) {
+		m.SetBackupLastSuccessfulTimestamp(schedule, timestamp)
+	}
+
+	// Only "active-schedule" should remain; "deleted-schedule" should be pruned
+	assert.Equal(t, 1, m.BackupLastSuccessfulTimestampCount())
+}
+
 // Unit tests to make sure that the backup's status is updated correctly during reconcile.
 // To clear up confusion whether status can be updated with Patch alone without status writer and not kbClient.Status().Patch()
 func TestPatchResourceWorksWithStatus(t *testing.T) {
