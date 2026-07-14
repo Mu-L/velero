@@ -758,6 +758,13 @@ func (m *ServerMetrics) RegisterPodVolumeOpLatencyGauge(node, pvbName, opName, b
 	}
 }
 
+// ResetBackupLastSuccessfulTimestamp removes all schedule-level backupLastSuccessfulTimestamp values.
+func (m *ServerMetrics) ResetBackupLastSuccessfulTimestamp() {
+	if g, ok := m.metrics[backupLastSuccessfulTimestamp].(*prometheus.GaugeVec); ok {
+		g.Reset()
+	}
+}
+
 // SetBackupTarballSizeBytesGauge records the size, in bytes, of a backup tarball.
 func (m *ServerMetrics) SetBackupTarballSizeBytesGauge(backupSchedule string, size int64) {
 	if g, ok := m.metrics[backupTarballSizeBytesGauge].(*prometheus.GaugeVec); ok {

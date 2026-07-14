@@ -457,6 +457,38 @@ func getHistogramCount(t *testing.T, vec *prometheus.HistogramVec, scheduleLabel
 	return 0
 }
 
+// TestResetBackupLastSuccessfulTimestamp verifies that ResetBackupLastSuccessfulTimestamp
+// removes all schedule-level values from the backupLastSuccessfulTimestamp gauge.
+func TestResetBackupLastSuccessfulTimestamp(t *testing.T) {
+	m := NewServerMetrics()
+
+	now := time.Now()
+	m.SetBackupLastSuccessfulTimestamp("schedule-1", now)
+	m.SetBackupLastSuccessfulTimestamp("schedule-2", now.Add(-time.Hour))
+	m.SetBackupLastSuccessfulTimestamp("", now.Add(-2*time.Hour))
+
+	// Verify all three entries exist
+	g := m.metrics[backupLastSuccessfulTimestamp].(*prometheus.GaugeVec)
+	assert.Equal(t, 3, collectGaugeCount(t, g))
+
+	// Reset should remove all entries
+	m.ResetBackupLastSuccessfulTimestamp()
+	assert.Equal(t, 0, collectGaugeCount(t, g))
+}
+
+// collectGaugeCount returns the number of time series in a GaugeVec.
+func collectGaugeCount(t *testing.T, g *prometheus.GaugeVec) int {
+	t.Helper()
+	ch := make(chan prometheus.Metric, 10)
+	g.Collect(ch)
+	close(ch)
+	count := 0
+	for range ch {
+		count++
+	}
+	return count
+}
+
 // TestRepoMaintenanceMetrics verifies that repo maintenance metrics are properly recorded.
 func TestRepoMaintenanceMetrics(t *testing.T) {
 	tests := []struct {
