@@ -12,7 +12,7 @@ spec:
     listKind: DownloadRequestList
     plural: downloadrequests
     shortNames:
-    - dr
+    - dreq
     singular: downloadrequest
   scope: Namespaced
   versions:
