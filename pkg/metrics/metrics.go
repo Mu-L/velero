@@ -765,23 +765,6 @@ func (m *ServerMetrics) ResetBackupLastSuccessfulTimestamp() {
 	}
 }
 
-// BackupLastSuccessfulTimestampCount returns the number of active time series
-// in the backupLastSuccessfulTimestamp gauge.
-func (m *ServerMetrics) BackupLastSuccessfulTimestampCount() int {
-	g, ok := m.metrics[backupLastSuccessfulTimestamp].(*prometheus.GaugeVec)
-	if !ok {
-		return 0
-	}
-	ch := make(chan prometheus.Metric, 100)
-	g.Collect(ch)
-	close(ch)
-	count := 0
-	for range ch {
-		count++
-	}
-	return count
-}
-
 // SetBackupTarballSizeBytesGauge records the size, in bytes, of a backup tarball.
 func (m *ServerMetrics) SetBackupTarballSizeBytesGauge(backupSchedule string, size int64) {
 	if g, ok := m.metrics[backupTarballSizeBytesGauge].(*prometheus.GaugeVec); ok {

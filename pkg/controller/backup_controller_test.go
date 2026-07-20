@@ -31,6 +31,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -2049,10 +2050,11 @@ func Test_updateTotalBackupMetric_prunesStaleTimestamps(t *testing.T) {
 	require.NoError(t, err)
 
 	m := metrics.NewServerMetrics()
+	gauge := m.Metrics()["backup_last_successful_timestamp"].(*prometheus.GaugeVec)
 
 	// Simulate a previous resync that set the metric for "deleted-schedule"
 	m.SetBackupLastSuccessfulTimestamp("deleted-schedule", baseTime)
-	require.Equal(t, 1, m.BackupLastSuccessfulTimestampCount())
+	require.Equal(t, 1, collectGaugeCount(t, gauge))
 
 	// Current backups only contain entries for "active-schedule"
 	backups := []velerov1api.Backup{
@@ -2070,7 +2072,19 @@ func Test_updateTotalBackupMetric_prunesStaleTimestamps(t *testing.T) {
 	}
 
 	// Only "active-schedule" should remain; "deleted-schedule" should be pruned
-	assert.Equal(t, 1, m.BackupLastSuccessfulTimestampCount())
+	assert.Equal(t, 1, collectGaugeCount(t, gauge))
+}
+
+func collectGaugeCount(t *testing.T, g *prometheus.GaugeVec) int {
+	t.Helper()
+	ch := make(chan prometheus.Metric, 10)
+	g.Collect(ch)
+	close(ch)
+	count := 0
+	for range ch {
+		count++
+	}
+	return count
 }
 
 // Unit tests to make sure that the backup's status is updated correctly during reconcile.
