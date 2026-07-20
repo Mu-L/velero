@@ -212,14 +212,14 @@ func (b *backupReconciler) updateTotalBackupMetric() {
 					b.logger.Error(err, "Error computing backup_total metric")
 				} else {
 					b.metrics.SetBackupTotal(int64(len(backups.Items)))
-				}
 
-				// recompute backup_last_successful_timestamp metric for each
-				// schedule (including the empty schedule, i.e. ad-hoc backups).
-				// Reset first to prune stale entries for deleted schedules.
-				b.metrics.ResetBackupLastSuccessfulTimestamp()
-				for schedule, timestamp := range getLastSuccessBySchedule(backups.Items) {
-					b.metrics.SetBackupLastSuccessfulTimestamp(schedule, timestamp)
+					// recompute backup_last_successful_timestamp metric for each
+					// schedule (including the empty schedule, i.e. ad-hoc backups).
+					// Reset first to prune stale entries for deleted schedules.
+					b.metrics.ResetBackupLastSuccessfulTimestamp()
+					for schedule, timestamp := range getLastSuccessBySchedule(backups.Items) {
+						b.metrics.SetBackupLastSuccessfulTimestamp(schedule, timestamp)
+					}
 				}
 			},
 			backupResyncPeriod,
