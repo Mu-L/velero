@@ -18,6 +18,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"reflect"
@@ -2085,6 +2086,44 @@ func collectGaugeCount(t *testing.T, g *prometheus.GaugeVec) int {
 		count++
 	}
 	return count
+}
+
+// Test_updateTotalBackupMetric_prunesStaleTimestamps_integration tests the actual
+// updateTotalBackupMetric goroutine with a fake client to verify stale metrics are
+// pruned during a real resync cycle.
+func Test_updateTotalBackupMetric_prunesStaleTimestamps_integration(t *testing.T) {
+	baseTime, err := time.Parse(time.RFC1123, time.RFC1123)
+	require.NoError(t, err)
+
+	m := metrics.NewServerMetrics()
+	gauge := m.Metrics()["backup_last_successful_timestamp"].(*prometheus.GaugeVec)
+
+	activeBackup := builder.ForBackup("velero", "b1").
+		ObjectMeta(builder.WithLabels(velerov1api.ScheduleNameLabel, "active-schedule")).
+		Phase(velerov1api.BackupPhaseCompleted).
+		CompletionTimestamp(baseTime).
+		Result()
+
+	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, activeBackup)
+
+	m.SetBackupLastSuccessfulTimestamp("deleted-schedule", baseTime)
+	require.Equal(t, 1, collectGaugeCount(t, gauge))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c := &backupReconciler{
+		ctx:      ctx,
+		kbClient: fakeClient,
+		logger:   logrus.StandardLogger(),
+		metrics:  m,
+	}
+
+	c.updateTotalBackupMetric()
+	time.Sleep(7 * time.Second)
+	cancel()
+
+	assert.Equal(t, 1, collectGaugeCount(t, gauge))
 }
 
 // Unit tests to make sure that the backup's status is updated correctly during reconcile.
