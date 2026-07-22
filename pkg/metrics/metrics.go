@@ -758,10 +758,11 @@ func (m *ServerMetrics) RegisterPodVolumeOpLatencyGauge(node, pvbName, opName, b
 	}
 }
 
-// ResetBackupLastSuccessfulTimestamp removes all schedule-level backupLastSuccessfulTimestamp values.
-func (m *ServerMetrics) ResetBackupLastSuccessfulTimestamp() {
+// DeleteBackupLastSuccessfulTimestamp removes the backupLastSuccessfulTimestamp
+// metric for a single schedule.
+func (m *ServerMetrics) DeleteBackupLastSuccessfulTimestamp(scheduleName string) {
 	if g, ok := m.metrics[backupLastSuccessfulTimestamp].(*prometheus.GaugeVec); ok {
-		g.Reset()
+		g.DeleteLabelValues(scheduleName)
 	}
 }
 

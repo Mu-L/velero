@@ -18,7 +18,6 @@ package controller
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"io"
 	"reflect"
@@ -32,7 +31,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
-	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -2043,60 +2042,15 @@ func Test_getLastSuccessBySchedule(t *testing.T) {
 	}
 }
 
-// Test_updateTotalBackupMetric_prunesStaleTimestamps verifies that the periodic
-// resync removes backupLastSuccessfulTimestamp entries for schedules that no longer
-// have any completed backups (e.g. after the schedule and its backups are deleted).
-func Test_updateTotalBackupMetric_prunesStaleTimestamps(t *testing.T) {
+// Test_resyncBackupMetrics_prunesStaleTimestamps verifies that resyncBackupMetrics
+// removes backupLastSuccessfulTimestamp entries for schedules that no longer have
+// any completed backups (e.g. after the schedule and its backups are deleted).
+func Test_resyncBackupMetrics_prunesStaleTimestamps(t *testing.T) {
 	baseTime, err := time.Parse(time.RFC1123, time.RFC1123)
 	require.NoError(t, err)
 
 	m := metrics.NewServerMetrics()
-	gauge := m.Metrics()["backup_last_successful_timestamp"].(*prometheus.GaugeVec)
-
-	// Simulate a previous resync that set the metric for "deleted-schedule"
-	m.SetBackupLastSuccessfulTimestamp("deleted-schedule", baseTime)
-	require.Equal(t, 1, collectGaugeCount(t, gauge))
-
-	// Current backups only contain entries for "active-schedule"
-	backups := []velerov1api.Backup{
-		*builder.ForBackup("velero", "b1").
-			ObjectMeta(builder.WithLabels(velerov1api.ScheduleNameLabel, "active-schedule")).
-			Phase(velerov1api.BackupPhaseCompleted).
-			CompletionTimestamp(baseTime).
-			Result(),
-	}
-
-	// Replicate the resync logic: reset then set
-	m.ResetBackupLastSuccessfulTimestamp()
-	for schedule, timestamp := range getLastSuccessBySchedule(backups) {
-		m.SetBackupLastSuccessfulTimestamp(schedule, timestamp)
-	}
-
-	// Only "active-schedule" should remain; "deleted-schedule" should be pruned
-	assert.Equal(t, 1, collectGaugeCount(t, gauge))
-}
-
-func collectGaugeCount(t *testing.T, g *prometheus.GaugeVec) int {
-	t.Helper()
-	ch := make(chan prometheus.Metric, 10)
-	g.Collect(ch)
-	close(ch)
-	count := 0
-	for range ch {
-		count++
-	}
-	return count
-}
-
-// Test_updateTotalBackupMetric_prunesStaleTimestamps_integration tests the actual
-// updateTotalBackupMetric goroutine with a fake client to verify stale metrics are
-// pruned during a real resync cycle.
-func Test_updateTotalBackupMetric_prunesStaleTimestamps_integration(t *testing.T) {
-	baseTime, err := time.Parse(time.RFC1123, time.RFC1123)
-	require.NoError(t, err)
-
-	m := metrics.NewServerMetrics()
-	gauge := m.Metrics()["backup_last_successful_timestamp"].(*prometheus.GaugeVec)
+	gauge := m.Metrics()["backup_last_successful_timestamp"]
 
 	activeBackup := builder.ForBackup("velero", "b1").
 		ObjectMeta(builder.WithLabels(velerov1api.ScheduleNameLabel, "active-schedule")).
@@ -2104,26 +2058,30 @@ func Test_updateTotalBackupMetric_prunesStaleTimestamps_integration(t *testing.T
 		CompletionTimestamp(baseTime).
 		Result()
 
-	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, activeBackup)
+	deletedBackup := builder.ForBackup("velero", "b2").
+		ObjectMeta(builder.WithLabels(velerov1api.ScheduleNameLabel, "deleted-schedule")).
+		Phase(velerov1api.BackupPhaseCompleted).
+		CompletionTimestamp(baseTime).
+		Result()
 
-	m.SetBackupLastSuccessfulTimestamp("deleted-schedule", baseTime)
-	require.Equal(t, 1, collectGaugeCount(t, gauge))
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	fakeClient := velerotest.NewFakeControllerRuntimeClient(t, activeBackup, deletedBackup)
 
 	c := &backupReconciler{
-		ctx:      ctx,
 		kbClient: fakeClient,
 		logger:   logrus.StandardLogger(),
 		metrics:  m,
 	}
 
-	c.updateTotalBackupMetric()
-	time.Sleep(7 * time.Second)
-	cancel()
+	// First resync: sets metrics for both schedules
+	c.resyncBackupMetrics()
+	assert.Equal(t, 2, testutil.CollectAndCount(gauge))
 
-	assert.Equal(t, 1, collectGaugeCount(t, gauge))
+	// Simulate schedule deletion: remove the backup for "deleted-schedule"
+	require.NoError(t, fakeClient.Delete(t.Context(), deletedBackup))
+
+	// Second resync: prunes "deleted-schedule" metric, keeps "active-schedule"
+	c.resyncBackupMetrics()
+	assert.Equal(t, 1, testutil.CollectAndCount(gauge))
 }
 
 // Unit tests to make sure that the backup's status is updated correctly during reconcile.

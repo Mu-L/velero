@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -457,9 +458,9 @@ func getHistogramCount(t *testing.T, vec *prometheus.HistogramVec, scheduleLabel
 	return 0
 }
 
-// TestResetBackupLastSuccessfulTimestamp verifies that ResetBackupLastSuccessfulTimestamp
-// removes all schedule-level values from the backupLastSuccessfulTimestamp gauge.
-func TestResetBackupLastSuccessfulTimestamp(t *testing.T) {
+// TestDeleteBackupLastSuccessfulTimestamp verifies that DeleteBackupLastSuccessfulTimestamp
+// removes only the specified schedule's metric.
+func TestDeleteBackupLastSuccessfulTimestamp(t *testing.T) {
 	m := NewServerMetrics()
 
 	now := time.Now()
@@ -467,13 +468,17 @@ func TestResetBackupLastSuccessfulTimestamp(t *testing.T) {
 	m.SetBackupLastSuccessfulTimestamp("schedule-2", now.Add(-time.Hour))
 	m.SetBackupLastSuccessfulTimestamp("", now.Add(-2*time.Hour))
 
-	// Verify all three entries exist
 	g := m.metrics[backupLastSuccessfulTimestamp].(*prometheus.GaugeVec)
-	assert.Equal(t, 3, collectGaugeCount(t, g))
+	assert.Equal(t, 3, testutil.CollectAndCount(g))
 
-	// Reset should remove all entries
-	m.ResetBackupLastSuccessfulTimestamp()
-	assert.Equal(t, 0, collectGaugeCount(t, g))
+	m.DeleteBackupLastSuccessfulTimestamp("schedule-1")
+	assert.Equal(t, 2, testutil.CollectAndCount(g))
+
+	m.DeleteBackupLastSuccessfulTimestamp("schedule-2")
+	assert.Equal(t, 1, testutil.CollectAndCount(g))
+
+	m.DeleteBackupLastSuccessfulTimestamp("")
+	assert.Equal(t, 0, testutil.CollectAndCount(g))
 }
 
 // collectGaugeCount returns the number of time series in a GaugeVec.
