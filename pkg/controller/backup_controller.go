@@ -84,34 +84,34 @@ var autoExcludeClusterScopedResources = []string{
 }
 
 type backupReconciler struct {
-	ctx                           context.Context
-	logger                        logrus.FieldLogger
-	discoveryHelper               discovery.Helper
-	backupper                     pkgbackup.Backupper
-	kbClient                      kbclient.Client
-	clock                         clock.WithTickerAndDelayedExecution
-	backupLogLevel                logrus.Level
-	newPluginManager              func(logrus.FieldLogger) clientmgmt.Manager
-	backupTracker                 BackupTracker
-	defaultBackupLocation         string
-	defaultVolumesToFsBackup      bool
-	defaultBackupTTL              time.Duration
-	defaultVGSLabelKey            string
-	defaultCSISnapshotTimeout     time.Duration
-	resourceTimeout               time.Duration
-	defaultItemOperationTimeout   time.Duration
-	defaultSnapshotLocations      map[string]string
-	metrics                       *metrics.ServerMetrics
-	backupStoreGetter             persistence.ObjectBackupStoreGetter
-	formatFlag                    logging.Format
-	credentialFileStore           credentials.FileStore
-	maxConcurrentK8SConnections   int
-	defaultSnapshotMoveData       bool
-	globalCRClient                        kbclient.Client
-	itemBlockWorkerCount                  int
-	concurrentBackups                     int
-	globalVolumePoliciesConfigMap         string
-	knownSchedulesWithSuccessfulBackup    sets.Set[string]
+	ctx                                context.Context
+	logger                             logrus.FieldLogger
+	discoveryHelper                    discovery.Helper
+	backupper                          pkgbackup.Backupper
+	kbClient                           kbclient.Client
+	clock                              clock.WithTickerAndDelayedExecution
+	backupLogLevel                     logrus.Level
+	newPluginManager                   func(logrus.FieldLogger) clientmgmt.Manager
+	backupTracker                      BackupTracker
+	defaultBackupLocation              string
+	defaultVolumesToFsBackup           bool
+	defaultBackupTTL                   time.Duration
+	defaultVGSLabelKey                 string
+	defaultCSISnapshotTimeout          time.Duration
+	resourceTimeout                    time.Duration
+	defaultItemOperationTimeout        time.Duration
+	defaultSnapshotLocations           map[string]string
+	metrics                            *metrics.ServerMetrics
+	backupStoreGetter                  persistence.ObjectBackupStoreGetter
+	formatFlag                         logging.Format
+	credentialFileStore                credentials.FileStore
+	maxConcurrentK8SConnections        int
+	defaultSnapshotMoveData            bool
+	globalCRClient                     kbclient.Client
+	itemBlockWorkerCount               int
+	concurrentBackups                  int
+	globalVolumePoliciesConfigMap      string
+	knownSchedulesWithSuccessfulBackup sets.Set[string]
 }
 
 func NewBackupReconciler(
