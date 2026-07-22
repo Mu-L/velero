@@ -473,25 +473,15 @@ func TestDeleteBackupLastSuccessfulTimestamp(t *testing.T) {
 
 	m.DeleteBackupLastSuccessfulTimestamp("schedule-1")
 	assert.Equal(t, 2, testutil.CollectAndCount(g))
+	assert.Equal(t, float64(now.Add(-time.Hour).Unix()), testutil.ToFloat64(g.WithLabelValues("schedule-2")))
+	assert.Equal(t, float64(now.Add(-2*time.Hour).Unix()), testutil.ToFloat64(g.WithLabelValues("")))
 
 	m.DeleteBackupLastSuccessfulTimestamp("schedule-2")
 	assert.Equal(t, 1, testutil.CollectAndCount(g))
+	assert.Equal(t, float64(now.Add(-2*time.Hour).Unix()), testutil.ToFloat64(g.WithLabelValues("")))
 
 	m.DeleteBackupLastSuccessfulTimestamp("")
 	assert.Equal(t, 0, testutil.CollectAndCount(g))
-}
-
-// collectGaugeCount returns the number of time series in a GaugeVec.
-func collectGaugeCount(t *testing.T, g *prometheus.GaugeVec) int {
-	t.Helper()
-	ch := make(chan prometheus.Metric, 10)
-	g.Collect(ch)
-	close(ch)
-	count := 0
-	for range ch {
-		count++
-	}
-	return count
 }
 
 // TestRepoMaintenanceMetrics verifies that repo maintenance metrics are properly recorded.
